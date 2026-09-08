@@ -203,10 +203,11 @@
     const gu = guide();
     ctx.fillStyle = gu.well;
     ctx.fillRect(P.originX, P.originY, P.puzzleW, P.puzzleH);
+    // Fully opaque: a faint ghost is hard to read on a busy painting, and peek
+    // is a deliberate hold - you asked to see it, so show it properly. Pieces
+    // still draw on top, so you can see exactly what is already placed.
     if (anyonePeeking() && S.img) {
-      ctx.globalAlpha = 0.35;
       ctx.drawImage(S.img, P.originX, P.originY, P.puzzleW, P.puzzleH);
-      ctx.globalAlpha = 1;
     }
     ctx.strokeStyle = gu.line;
     ctx.lineWidth = 2 / S.view.scale;
