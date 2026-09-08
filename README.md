@@ -1,6 +1,6 @@
 # Jigsaw Together
 
-### ▶ Play it: **https://jigsaw-together.onrender.com**
+### ▶ Play it: **https://playjigsaw.onrender.com**
 
 Open it on two devices, start a room, share the code. Nothing to install.
 
@@ -101,7 +101,7 @@ Two things to expect:
 
 ### Option B - host it permanently (already done)
 
-This is deployed at **https://jigsaw-together.onrender.com** on Render's free
+This is deployed at **https://playjigsaw.onrender.com** on Render's free
 tier, managed by the `render.yaml` in this repo. Pushing to `main` redeploys
 it automatically - the blueprint is the source of truth, so nothing is
 configured by hand in the dashboard.
@@ -133,7 +133,7 @@ the free allowance - the hours are the budget, not the uptime. Point any free
 uptime pinger (cron-job.org, UptimeRobot) at:
 
 ```
-https://jigsaw-together.onrender.com/health
+https://playjigsaw.onrender.com/health
 ```
 
 every 10 minutes. `/health` is a trivial JSON response, so this costs almost
@@ -232,7 +232,7 @@ reports what survives.
 Point any of them at a deployed instance:
 
 ```bash
-JT_URL=wss://jigsaw-together.onrender.com npm test
+JT_URL=wss://playjigsaw.onrender.com npm test
 ```
 
 All three suites pass against the live deployment.
