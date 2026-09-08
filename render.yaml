@@ -4,7 +4,10 @@
 # automatically; nothing needs configuring in the dashboard.
 services:
   - type: web
-    name: jigsaw-together
+    # Must match the service name in the Render dashboard. Blueprints bind to
+    # services BY NAME, so if these drift apart the next sync creates a second
+    # service instead of updating this one.
+    name: playjigsaw
     runtime: node
     plan: free
     buildCommand: npm ci
