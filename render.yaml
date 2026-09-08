@@ -1,0 +1,12 @@
+# One-click deploy on Render's free tier. Websockets work there out of the box.
+services:
+  - type: web
+    name: jigsaw-together
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"

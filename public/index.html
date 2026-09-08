@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Deliberately NOT viewport-fit=cover: it lets the page slide under the iOS
+     status bar, and the top bar disappeared behind it. Safari's default lays
+     content out below its own chrome, which is what we want. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Jigsaw Together</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
+</head>
+<body>
+
+<!-- ============================ board ============================ -->
+<div id="game" hidden>
+  <header id="bar">
+    <div class="bar-left">
+      <span class="logo">🧩</span>
+      <button id="copyLink" class="chip" title="Copy the invite link">
+        Room <b id="roomCode">----</b><span class="copy-hint">copy link</span>
+      </button>
+    </div>
+
+    <div class="bar-mid">
+      <div class="progress" title="Pieces joined together">
+        <div class="progress-fill" id="progressFill"></div>
+        <span id="progressText">0%</span>
+      </div>
+      <span id="timer" class="mono">00:00</span>
+      <button id="netStat" class="net" title="Connection quality">
+        <span class="bars"><i></i><i></i><i></i></span><span class="ms"></span>
+      </button>
+    </div>
+
+    <div class="bar-right">
+      <!-- Peek stays in the bar on every size: it is the one control used
+           constantly while playing. -->
+      <button id="btnPreview" class="chip" title="Hold down to peek at the finished picture">Hold to peek</button>
+
+      <!-- On a phone this whole group moves into the panel, where there is room
+           for it; on desktop it stays here in the bar. Leave lives in it, so on
+           a phone exiting is deliberately a step further away than peeking. -->
+      <div id="boardControls" class="controls">
+          <button id="btnFit" class="chip" title="Fit the whole board on screen (F)">Fit</button>
+        <button id="btnTheme" class="chip icon" title="Switch theme">🌙</button>
+        <span class="leave-wrap">
+          <button id="btnLeave" class="chip danger" title="Leave this room">Leave</button>
+          <div id="leaveConfirm" class="popover" hidden>
+            <p>Exit the game?</p>
+            <div class="popover-row">
+              <button id="leaveNo" class="btn ghost small">Stay</button>
+              <button id="leaveYes" class="btn small danger-btn">Exit game</button>
+            </div>
+          </div>
+        </span>
+      </div>
+      <div id="barControls"></div>
+
+      <button id="btnSide" class="chip" title="Show or hide the panel">
+        <span class="side-label">Players</span><span class="side-burger">☰</span>
+      </button>
+    </div>
+  </header>
+
+  <canvas id="board"></canvas>
+  <canvas id="fx"></canvas>
+  <div id="cursors"></div>
+  <div id="pipLayer"></div>
+
+  <aside id="side">
+    <button id="sheetGrip" class="sheet-grip" aria-label="Close panel"></button>
+    <div id="sheetControls"></div>
+    <section class="panel">
+      <h3>Scoreboard <span id="pieceTally" class="tally"></span></h3>
+      <ul id="playerList"></ul>
+      <p class="hint">Pieces you lock into place are counted here.</p>
+    </section>
+    <section class="panel voice-panel">
+      <h3>Voice &amp; video <span id="callState" class="tally"></span></h3>
+      <div class="call-bar">
+        <button id="btnMic" class="call-btn" aria-pressed="false" title="Turn your microphone on">
+          <span class="ic"></span><span class="lbl">Mic</span>
+        </button>
+        <button id="btnCam" class="call-btn" aria-pressed="false" title="Turn your camera on">
+          <span class="ic"></span><span class="lbl">Camera</span>
+        </button>
+      </div>
+      <div id="audioSinks" hidden></div>
+      <p id="rtcNote" class="hint"></p>
+    </section>
+
+    <section class="panel chat-panel">
+      <h3>Chat <button id="btnChatToggle" class="mini" title="Hide chat">hide</button></h3>
+      <div id="chatBody">
+        <div id="chatLog"></div>
+        <form id="chatForm" autocomplete="off">
+          <input id="chatInput" maxlength="240" placeholder="Say something...">
+        </form>
+      </div>
+    </section>
+  </aside>
+
+  <div id="toast" hidden></div>
+
+  <div id="wait" class="veil" hidden>
+    <div class="veil-card">
+      <div class="spinner"></div>
+      <h2>Waiting for the host</h2>
+      <p>They're picking a picture. Hang tight - the board appears the moment they start.</p>
+      <p class="muted">Room <b id="waitCode"></b></p>
+    </div>
+  </div>
+
+  <div id="win" class="veil" hidden>
+    <div class="veil-card">
+      <div class="trophy">🎉</div>
+      <h2>Solved!</h2>
+      <p id="winText" class="muted"></p>
+      <ul id="winScores" class="win-scores"></ul>
+      <div class="row">
+        <button id="winClose" class="btn ghost">Admire it</button>
+        <button id="winAgain" class="btn" hidden>Play again</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ lobby ============================ -->
+<div id="unsupported" class="veil" hidden>
+  <div class="veil-card">
+    <div class="trophy">🧩</div>
+    <h2>This browser can't run the board</h2>
+    <p class="muted" id="unsupportedWhy"></p>
+    <p class="muted">Any recent Chrome, Safari, Edge or Firefox will work, on phone or desktop.</p>
+  </div>
+</div>
+
+<div id="lobby">
+  <div class="lobby-card">
+    <h1><span class="logo">🧩</span> Jigsaw Together</h1>
+    <p class="tagline">One shared board. Everyone's cursor visible, live. No install, no account.</p>
+
+    <div class="tabs" role="tablist">
+      <button id="tabCreate" class="tab on" role="tab">Create new game</button>
+      <button id="tabJoin" class="tab" role="tab">Join a room</button>
+    </div>
+
+    <label class="field">
+      <span>Your name <em>required</em></span>
+      <input id="name" maxlength="20" placeholder="Your name" autocomplete="nickname" required>
+    </label>
+
+    <div class="field">
+      <span>Your colour <em id="colourNote"></em></span>
+      <div id="swatches" class="swatches"></div>
+    </div>
+
+    <section id="paneCreate">
+      <button id="btnCreate" class="btn wide">Create new game</button>
+      <p class="hint centered">You'll pick a painting next, then share the room code.</p>
+    </section>
+
+    <section id="paneJoin" hidden>
+      <label class="field">
+        <span>Room code</span>
+        <input id="joinCode" class="code-input" maxlength="4" placeholder="CODE"
+               autocomplete="off" autocapitalize="characters" spellcheck="false">
+      </label>
+      <div id="roomPreview" class="room-preview" hidden></div>
+      <button id="btnJoin" class="btn wide" disabled>Join room</button>
+    </section>
+
+    <p id="lobbyError" class="error" hidden></p>
+  </div>
+</div>
+
+<!-- ============================ setup ============================ -->
+<div id="setup" class="veil" hidden>
+  <div class="veil-card wide setup-card">
+    <header class="setup-head">
+      <h2>Pick a painting</h2>
+      <label class="btn ghost file small">
+        Upload your own<input id="fileInput" type="file" accept="image/*" hidden>
+      </label>
+    </header>
+
+    <div class="setup-scroll">
+      <div id="galleryGrid" class="gallery"></div>
+    </div>
+
+    <footer class="setup-foot">
+      <div class="chosen" id="chosen" hidden>
+        <img id="chosenImg" alt="Chosen picture">
+        <div>
+          <b id="chosenTitle"></b>
+          <p class="muted" id="chosenMeta"></p>
+        </div>
+      </div>
+      <p class="muted pick-hint" id="pickHint">Choose a painting to begin.</p>
+      <p id="setupError" class="error" hidden></p>
+      <button id="btnStart" class="btn" disabled>Start puzzle</button>
+    </footer>
+  </div>
+</div>
+
+<script src="/shared/puzzle.js"></script>
+<script src="js/gallery.js"></script>
+<script src="js/pieces.js"></script>
+<script src="js/net.js"></script>
+<script src="js/rtc.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "jigsaw-together",
+  "version": "1.0.0",
+  "description": "Realtime collaborative jigsaw puzzle - one shared board, live cursors, playable across the internet",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node tests/protocol.test.js && node tests/snap.test.js && node tests/hold.test.js",
+    "share": "cloudflared tunnel --url http://localhost:3000 --no-autoupdate",
+    "test:security": "node tests/security.probe.js",
+    "play": "node tools/play.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  }
+}
