@@ -90,24 +90,33 @@ Two things to expect:
 
 `npm run share` runs only the tunnel, for when the server is already going.
 
-### Option B — put it online (permanent)
+### Option B - host it permanently (survives your PC being off)
 
-Any host that supports websockets works. `render.yaml` and a `Dockerfile` are
-included.
+The repo carries a `render.yaml`, so Render reads the whole configuration
+itself - runtime, build, start command, health check and env vars. Nothing
+needs setting in the dashboard.
 
-**Render** (free tier, no card):
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/utkarshalpha/jigsaw-together)
 
-1. Push this folder to a GitHub repo.
-2. On render.com: **New → Blueprint**, point it at the repo. It reads `render.yaml`.
-3. You get a `https://your-app.onrender.com` URL. Share that.
+Or by hand:
 
-Anything that runs a Node process will do — Railway, Fly.io, Koyeb, a VPS.
-`PORT` is read from the environment; nothing else is needed. There's a
-`/health` endpoint for health checks.
+1. Sign in at [render.com](https://render.com) with GitHub (free, no card).
+2. **New → Blueprint**, choose this repository.
+3. **Apply**. First build takes a couple of minutes.
+4. You get a permanent `https://<name>.onrender.com`. Share that.
 
-> Free tiers usually sleep when idle, so the first visit after a quiet spell can
-> take ~30 seconds to wake up. Everyone in a room shares one server process, so
-> once it's warm it stays warm.
+Anything that runs a Node process works the same way - Railway, Fly.io,
+Koyeb, a VPS. `PORT` comes from the environment and `/health` is there for
+health checks. Set `TRUST_PROXY=1` behind any reverse proxy, or the per-IP
+rate limits will treat every player as the same client.
+
+What the free tier costs you:
+
+- **It sleeps after ~15 minutes idle**, and the first request afterwards
+  takes 30-60 seconds to wake it. Fine for a game you arrange in advance,
+  irritating if someone opens the link cold.
+- **Rooms live in memory**, so a sleep or redeploy ends any game in progress.
+  Everyone just starts a new one; nothing is corrupted.
 
 ## Controls
 
