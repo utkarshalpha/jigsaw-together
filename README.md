@@ -37,8 +37,9 @@ Two players or twelve. Nobody needs to be on the same network.
 - **~126 pieces**, fixed. No dial to fiddle with before you can start playing.
 - **Scoreboard.** Live count of who has locked in how many pieces, with a crown
   for whoever's ahead, and medals on the finish screen.
-- **Hold to peek.** Press and hold to see the finished picture; let go and it's
-  gone, so nobody leaves the answer parked on screen.
+- **Hold to peek, together.** Press and hold to see the finished picture -
+  everyone at the table sees it while you hold, so you can point at where a
+  piece goes. Let go and it is gone for everyone.
 - **Confetti** when the last piece goes in.
 - Chat (foldable), progress bar, timer, a Leave button, and a shuffle for the host.
 - **See the room before you enter it.** Type a code on the join screen and it's
@@ -148,12 +149,55 @@ budget only covers **one** always-on free service.
 | Pan the board | Drag empty felt, or hold Shift, or middle-drag |
 | Zoom | Mouse wheel, or pinch on a touchscreen |
 | Fit board to screen | `F`, or the **Fit** button |
-| Peek at the picture | **Hold** `P`, or hold the **Hold to peek** button in the top bar |
+| Peek at the picture | **Hold** `P`, or the **Hold to peek** button. Everyone at the table sees it while you hold |
 | Talk / show your face | **Mic** and **Camera** in the side panel |
 | Leave the room | **Leave** (asks once before it acts) |
 
 Pieces snap when dropped close enough to a correct neighbour, and locked
 assemblies then drag as one.
+
+## Tech stack, and why
+
+| Layer | Choice | Why this and not the obvious alternative |
+| --- | --- | --- |
+| Server | **Node + Express** | Serves the static files and one health endpoint. Express because the whole server is ~500 lines and a framework would be more scaffolding than code. |
+| Realtime | **`ws`** (plain WebSockets) | Not Socket.IO. Its value is long-polling fallback and reconnect logic; no browser we target needs the fallback, and the reconnect we need is ~20 lines in `net.js`. Skipping it keeps the page at **zero client-side dependencies**. |
+| Client | **Vanilla JS + Canvas 2D** | No React, no build step. The hot path is "draw 80 pre-rendered bitmaps and 5 cursors per frame" - a virtual DOM is the wrong tool, and no build means the deployed files are the files you edit. |
+| Piece shapes | **Path2D + one offscreen canvas per piece** | Each piece is rasterised once at load, shadow baked in; the frame loop only blits. Redrawing bezier outlines every frame would burn the budget for nothing. |
+| Voice / video | **WebRTC mesh, `ws` for signalling** | Media goes browser-to-browser, so the server never carries a frame - that is what makes a free instance viable for a call. Uses **perfect negotiation** and fixed transceivers + `replaceTrack`, so toggling a mic costs no renegotiation. |
+| Shared state | **In-memory on the server** | One process owns every room. The server referees snapping so no client can drift. This is the decision that dictates the host - see below. |
+| Pictures | **Public-domain paintings by URL** | Loaded from Wikimedia by each client, so the repo carries no image bytes and the server no bandwidth. Chosen by **measuring local contrast** (`tools/score-art.js`), not by taste. |
+| Tests | **Real websocket clients, no mocks** | Every suite drives actual connections against a running server, and can be pointed at production with `JT_URL`. A mocked socket would have passed every bug that mattered. |
+| Hosting | **Render free tier** | See below. |
+
+### Why Render, and not Vercel
+
+The whole board - rooms, piece positions, who is holding what - lives in one
+in-memory `Map` on the server. That single decision picks the host.
+
+Render runs **one persistent Node process**. Every player hits the same
+process, so shared memory just works, and connections stay open as long as the
+players do.
+
+Vercel now supports WebSockets, and this exact stack would run there. It is
+still wrong for this app, for one reason from Vercel's own docs:
+
+> "New WebSocket connections are not guaranteed to reach the same Vercel
+> Function instance."
+
+Two players could land on different instances and simply not see the same
+game, and each connection is cut at the function's max duration. Making it
+work means moving every room into Redis with pub/sub between instances, and
+making snap-merge atomic so two instances cannot resolve a drop at once -
+roughly 250 lines and a paid add-on, to arrive somewhere worse.
+
+So: **any always-on process host fits unchanged** - Render, Fly, Railway, a
+VPS. Render specifically because the free tier does websockets without
+asking for a card, and `render.yaml` means the deploy is described in the
+repo rather than clicked into a dashboard.
+
+The trade is that a free instance sleeps when idle and rooms are lost with it.
+Both are addressed above.
 
 ## How it fits together
 
@@ -239,23 +283,6 @@ All three suites pass against the live deployment.
 
 **`tools/score-art.js`** measures how solvable a painting is as a jigsaw. Run it
 before adding anything to the gallery.
-
-## Why not Vercel
-
-Vercel Functions do support WebSockets now, and this stack (Express + `ws`)
-would run there. It is still the wrong host for this app, for one reason from
-Vercel's own docs: *"New WebSocket connections are not guaranteed to reach the
-same Vercel Function instance."*
-
-The whole board - rooms, piece positions, who is holding what - is one in-memory
-Map. Two players on different instances would not see the same game, and each
-connection is also cut at the function's max duration. Making it work means
-moving all shared state into Redis with pub/sub between instances, and making
-snap-merge atomic so two instances cannot resolve a drop at once.
-
-That is a real option, not a hard no - it is just a different piece of work.
-A single persistent process is what a shared in-memory board wants, so any
-always-on host (Render, Fly, Railway, a VPS) fits it without changes.
 
 ## Device support
 
