@@ -36,6 +36,31 @@ const app = express();
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: 0 }));
 // The puzzle model is shared verbatim between server and browser.
 app.use('/shared', express.static(path.join(__dirname, 'shared'), { maxAge: 0 }));
+/* Search engines look for these at fixed paths; serving them from here keeps
+ * the deployed URL as the single source of truth. */
+const SITE = process.env.SITE_URL || 'https://playjigsaw.onrender.com';
+
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').send(
+    'User-agent: *\n' +
+    'Allow: /\n' +
+    'Sitemap: ' + SITE + '/sitemap.xml\n'
+  );
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  res.type('application/xml').send(
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    '  <url>\n' +
+    '    <loc>' + SITE + '/</loc>\n' +
+    '    <changefreq>weekly</changefreq>\n' +
+    '    <priority>1.0</priority>\n' +
+    '  </url>\n' +
+    '</urlset>\n'
+  );
+});
+
 app.get('/health', (_req, res) =>
   res.json({ ok: true, rooms: rooms.size, upSeconds: Math.round((Date.now() - STARTED_AT) / 1000) }));
 
@@ -71,7 +96,7 @@ const STARTED_AT = Date.now();          // used to explain vanished rooms
 /* Rolling per-minute counters keyed by client address. */
 const ipStats = new Map();
 
-const LOOPBACK = /^(::1$|::ffff:127.|127.)/;
+const LOOPBACK = /^(::1$|::ffff:127\.|127\.)/;
 
 /* Behind a tunnel or reverse proxy every player arrives from the proxy's own
  * address, so per-IP quotas would throttle the whole room collectively. The
