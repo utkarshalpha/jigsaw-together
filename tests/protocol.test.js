@@ -64,7 +64,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await C.open();
   C.send('join', { code: 'ZZZZ', name: 'Nope', color: '#fff' });
   const err = await C.wait('error');
-  if (!/No room/.test(err.message)) fail('expected a no-room error');
+  // Assert on the stable code, not the prose: the message deliberately changes
+  // to explain a restart when the server has only just come up.
+  if (err.code !== 'no-room') fail('expected a no-room error, got ' + JSON.stringify(err));
   C.ws.close();
   console.log('ok  unknown room code refused');
 

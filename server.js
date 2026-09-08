@@ -36,7 +36,8 @@ const app = express();
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: 0 }));
 // The puzzle model is shared verbatim between server and browser.
 app.use('/shared', express.static(path.join(__dirname, 'shared'), { maxAge: 0 }));
-app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get('/health', (_req, res) =>
+  res.json({ ok: true, rooms: rooms.size, upSeconds: Math.round((Date.now() - STARTED_AT) / 1000) }));
 
 const server = http.createServer(app);
 
@@ -65,6 +66,7 @@ const wss = new WebSocketServer({
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
+const STARTED_AT = Date.now();          // used to explain vanished rooms
 
 /* Rolling per-minute counters keyed by client address. */
 const ipStats = new Map();
@@ -362,7 +364,22 @@ wss.on('connection', (ws, req) => {
         room = makeRoom();
       } else {
         room = rooms.get(clean(msg.code, 8).toUpperCase());
-        if (!room) return send(ws, 'error', { message: 'No room with that code.' });
+        if (!room) {
+          /* A missing room usually means a typo - but right after a restart it
+           * means every game was lost, because rooms live in memory. Saying
+           * "no room with that code" then is actively misleading. */
+          const upMs = Date.now() - STARTED_AT;
+          const justRestarted = upMs < 15 * 60_000;
+          return send(ws, 'error', {
+            code: 'no-room',
+            restarted: justRestarted,
+            upSeconds: Math.round(upMs / 1000),
+            message: justRestarted
+              ? 'That room is gone - the server restarted ' + Math.max(1, Math.round(upMs / 60000)) +
+                ' minute(s) ago and games in progress are not kept. Start a new one.'
+              : 'No room with that code.'
+          });
+        }
         if (room.players.size >= MAX_PLAYERS) return send(ws, 'error', { message: 'That room is full.' });
       }
       player = {

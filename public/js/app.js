@@ -899,6 +899,20 @@
     Net.send('join', { code: S.code, name: S.me.name, color: S.me.color });
   });
 
+  /* If the room we were in has gone - almost always because the server
+   * restarted - say so plainly and put the player back at the lobby rather
+   * than leaving them staring at a dead board. */
+  Net.on('error', (m) => {
+    if (m.code !== 'no-room' || !S.code) return;
+    try { sessionStorage.removeItem('jt.room'); } catch { /* fine */ }
+    S.ready = false;
+    S.code = null;
+    $('game').hidden = true;
+    $('lobby').hidden = false;
+    $('lobbyError').textContent = m.message;
+    $('lobbyError').hidden = false;
+  });
+
   function showWin() {
     const s = Math.floor((S.solvedAt - S.startedAt) / 1000);
     const mins = Math.floor(s / 60), secs = s % 60;
