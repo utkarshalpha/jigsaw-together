@@ -21,7 +21,7 @@ const MAX_PLAYERS = 12;
  * pieces up and putting them down all burst naturally. Control actions (chat,
  * creating rooms, restarting, peeking) are deliberate human acts and should
  * never arrive dozens of times a second. */
-const PLAY_MSGS = new Set(['move', 'cursor', 'grab', 'drop', 'rtc']);
+const PLAY_MSGS = new Set(['move', 'cursor', 'grab', 'drop', 'rtc', 'preview']);
 const RATE_FAST = 120;          // gameplay messages per second
 const RATE_SLOW = 25;           // everything else per second
 // Per-source ceilings. Generous for real play, low enough that a script
@@ -478,6 +478,14 @@ wss.on('connection', (ws, req) => {
         broadcast(room, 'rtcState', {
           id: player.id, audio: player.media.audio, video: player.media.video
         }, player.id);
+        return;
+      }
+
+      /* Peek is shared: while somebody holds it, everyone sees the finished
+       * picture. It is how people actually use it - "hang on, let me show you
+       * where this bit goes". */
+      case 'preview': {
+        broadcast(room, 'preview', { id: player.id, on: !!msg.on }, player.id);
         return;
       }
 

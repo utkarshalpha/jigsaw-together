@@ -235,6 +235,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await sleep(120);
   }
 
+  // --- peek is shared ------------------------------------------------------
+  {
+    const seen = B.next('preview');
+    A.send('preview', { on: true });
+    const p = await seen;
+    if (p.id !== aJoined.you.id || p.on !== true) fail('peek was not relayed to the other player');
+    console.log('ok  holding peek shows the picture to everyone');
+
+    const off = B.next('preview');
+    A.send('preview', { on: false });
+    const q = await off;
+    if (q.on !== false) fail('releasing peek did not relay');
+    console.log('ok  releasing peek clears it for everyone');
+  }
+
   // --- chat and disconnect ----------------------------------------------
   B.send('chat', { text: 'nice one' });
   const chat = await A.wait('chat');

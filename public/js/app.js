@@ -58,6 +58,7 @@
     pointers: new Map(),
     pinch: null,
     preview: false,
+    peekers: new Set(),              // players currently holding peek
     startedAt: null,
     solvedAt: null,
     lastMoveSent: 0,
@@ -202,7 +203,7 @@
     const gu = guide();
     ctx.fillStyle = gu.well;
     ctx.fillRect(P.originX, P.originY, P.puzzleW, P.puzzleH);
-    if (S.preview && S.img) {
+    if (anyonePeeking() && S.img) {
       ctx.globalAlpha = 0.35;
       ctx.drawImage(S.img, P.originX, P.originY, P.puzzleW, P.puzzleH);
       ctx.globalAlpha = 1;
@@ -522,6 +523,18 @@
     const b = $('btnPreview');
     b.classList.toggle('on', on);
     b.textContent = on ? 'Peeking...' : 'Hold to peek';
+    // Everyone sees the picture while anybody holds it.
+    Net.send('preview', { on });
+  }
+
+  // True while anyone at the table is peeking, including us.
+  const anyonePeeking = () => S.preview || S.peekers.size > 0;
+
+  function peekLabel() {
+    const names = [...S.peekers]
+      .filter((id) => id !== S.me?.id && S.players.has(id))
+      .map((id) => S.players.get(id).name);
+    return names.length ? names.join(' and ') + (names.length > 1 ? ' are' : ' is') + ' peeking' : '';
   }
 
   // ===================================================================
@@ -807,6 +820,7 @@
     dropCursor(m.id);
     RTC.drop(m.id);
     S.media.delete(m.id);
+    S.peekers.delete(m.id);
     renderRoster();
     document.getElementById('tile-' + m.id)?.remove();
     renderPlayers();
@@ -866,6 +880,12 @@
       S.solvedAt = m.solved;
       showWin();
     }
+  });
+
+  Net.on('preview', (m) => {
+    if (m.on) S.peekers.add(m.id); else S.peekers.delete(m.id);
+    const who = peekLabel();
+    if (who) toast(who);
   });
 
   Net.on('chat', (m) => addChat(m.entry));
@@ -1498,6 +1518,10 @@
         const pip = makePip(id, p.name + (id === S.me?.id ? ' (you)' : ''), p.color, id === S.me?.id);
         pip.el.querySelector('.pip-mic').textContent = m.audio ? '\u{1F399}\uFE0F' : '\u{1F507}';
         pip.el.classList.toggle('muted', !m.audio);
+        /* The stream can arrive before this tile exists - the track and the
+         * rtcState announcement race - so bind whatever we already hold. */
+        const existing = id === S.me?.id ? RTC.selfStream : RTC.streamOf(id);
+        if (existing) attachStream(id, existing);
       } else {
         dropPip(id);
       }
@@ -1508,18 +1532,37 @@
   function attachStream(id, stream) {
     const p = pips.get(id);
     if (!p) return;
-    if (p.video.srcObject !== stream) p.video.srcObject = stream;
 
-    /* A video track can be live but muted - the sender backgrounded the tab, the
-     * OS took the camera, the network stalled. The element then paints solid
-     * black, which looks like a broken app rather than a paused camera. Watch
-     * the track and say which it is. */
     const track = stream.getVideoTracks()[0];
+
+    /* Re-bind whenever the track set changes, not just when the stream object
+     * changes. A peer's audio and video arrive as separate ontrack events on the
+     * SAME MediaStream, so when the mic connects first this element gets bound
+     * to a stream that has no video yet. Adding the camera track later mutates
+     * that same object, so an identity check never fires again - and Safari does
+     * not start rendering a track added after assignment. The result was a
+     * permanently black tile while audio worked perfectly.
+     *
+     * Clearing srcObject before reassigning is what actually forces the element
+     * to pick up the new track. */
+    const bound = p.video.srcObject;
+    const boundVideo = bound ? bound.getVideoTracks().length : -1;
+    if (bound !== stream || boundVideo !== stream.getVideoTracks().length) {
+      p.video.srcObject = null;
+      p.video.srcObject = stream;
+      p.video.play().catch(() => { /* autoplay policy; the tap handler retries */ });
+    }
+
+    /* Say WHY a tile is blank rather than showing an unexplained black box. */
     const paint = () => {
-      const dead = !track || track.muted || track.readyState === 'ended' || !track.enabled;
-      p.el.classList.toggle('blank', dead);
+      const t = p.video.srcObject && p.video.srcObject.getVideoTracks()[0];
+      let why = null;
+      if (!t) why = 'no video yet';
+      else if (t.readyState === 'ended') why = 'camera off';
+      else if (t.muted || !t.enabled) why = 'camera paused';
+      p.el.classList.toggle('blank', !!why);
       const label = p.el.querySelector('.pip-blank span');
-      if (label) label.textContent = track && track.readyState === 'ended' ? 'camera off' : 'camera paused';
+      if (label && why) label.textContent = why;
     };
     if (track && p.watched !== track) {
       p.watched = track;

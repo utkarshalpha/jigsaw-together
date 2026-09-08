@@ -248,6 +248,11 @@ const RTC = (() => {
     get secure() { return isSecure(); },
     get peerCount() { return peers.size; },
 
+    // A tile can be created after the media already arrived (the rtcState
+    // announcement and the track do not land in a guaranteed order), so the
+    // UI needs to be able to fetch what we already hold.
+    streamOf(id) { const p = peers.get(id); return p ? p.stream : null; },
+
     leaveAll() {
       for (const id of [...peers.keys()]) drop(id);
       if (micTrack) micTrack.stop();
