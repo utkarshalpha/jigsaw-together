@@ -110,13 +110,30 @@ Koyeb, a VPS. `PORT` comes from the environment and `/health` is there for
 health checks. Set `TRUST_PROXY=1` behind any reverse proxy, or the per-IP
 rate limits will treat every player as the same client.
 
-What the free tier costs you:
+What the free tier costs you, and what to do about it:
 
 - **It sleeps after ~15 minutes idle**, and the first request afterwards
   takes 30-60 seconds to wake it. Fine for a game you arrange in advance,
   irritating if someone opens the link cold.
-- **Rooms live in memory**, so a sleep or redeploy ends any game in progress.
-  Everyone just starts a new one; nothing is corrupted.
+- **Rooms live in memory**, so a sleep or redeploy ends any game in
+  progress. Everyone starts a new one; nothing is corrupted.
+
+**Keeping it awake, still free.** Render gives 750 instance-hours a month and
+a month is about 730 hours, so one service can stay up continuously inside
+the free allowance - the hours are the budget, not the uptime. Point any free
+uptime pinger (cron-job.org, UptimeRobot) at:
+
+```
+https://<your-app>.onrender.com/health
+```
+
+every 10 minutes. `/health` is a trivial JSON response, so this costs almost
+nothing, and it removes both the cold start and most of the state loss. The
+budget only covers **one** always-on free service, so if you run others they
+have to share the 750 hours.
+
+If you would rather not babysit it, Render's paid tier removes the sleep
+outright.
 
 ## Controls
 
@@ -211,6 +228,23 @@ Point any of them at a deployed instance with `JT_URL=wss://your-host`.
 
 **`tools/score-art.js`** measures how solvable a painting is as a jigsaw. Run it
 before adding anything to the gallery.
+
+## Why not Vercel
+
+Vercel Functions do support WebSockets now, and this stack (Express + `ws`)
+would run there. It is still the wrong host for this app, for one reason from
+Vercel's own docs: *"New WebSocket connections are not guaranteed to reach the
+same Vercel Function instance."*
+
+The whole board - rooms, piece positions, who is holding what - is one in-memory
+Map. Two players on different instances would not see the same game, and each
+connection is also cut at the function's max duration. Making it work means
+moving all shared state into Redis with pub/sub between instances, and making
+snap-merge atomic so two instances cannot resolve a drop at once.
+
+That is a real option, not a hard no - it is just a different piece of work.
+A single persistent process is what a shared in-memory board wants, so any
+always-on host (Render, Fly, Railway, a VPS) fits it without changes.
 
 ## Device support
 
