@@ -63,7 +63,8 @@
     solvedAt: null,
     lastMoveSent: 0,
     lastCursorSent: 0,
-    pendingSetup: null
+    pendingSetup: null,
+    imageMeta: null                  // what the server told us the picture is
   };
 
   const canvas = $('board');
@@ -595,6 +596,7 @@
 
   function applySnapshot(snap) {
     S.code = snap.code;
+    S.imageMeta = snap.image || S.imageMeta;
     S.hostId = snap.hostId;
     S.startedAt = snap.startedAt;
     S.solvedAt = snap.solvedAt;
@@ -894,9 +896,37 @@
   Net.on('close', () => toast('Connection lost - reconnecting...'));
 
   // Rejoin the same room automatically after a drop.
+  /* Everything needed to rebuild this room, which the client already holds in
+   * order to draw it. Sent on reconnect so a game survives the server being
+   * restarted or spun down - whoever gets back first hands the board over. */
+  function boardSnapshot() {
+    if (!S.puzzle || !S.imageMeta) return null;
+    const P = S.puzzle;
+    return {
+      image: S.imageMeta,
+      startedAt: S.startedAt,
+      puzzle: {
+        rows: P.rows, cols: P.cols,
+        pieceW: P.pieceW, pieceH: P.pieceH,
+        puzzleW: P.puzzleW, puzzleH: P.puzzleH,
+        boardW: P.boardW, boardH: P.boardH,
+        originX: P.originX, originY: P.originY,
+        snapTol: P.snapTol, seed: P.seed,
+        groups: rootGroups()
+          .filter((g) => g.pieces.length > 0)
+          .map((g) => ({ id: g.id, x: g.x, y: g.y, p: g.pieces }))
+      }
+    };
+  }
+
   Net.setResume(() => {
     if (!S.me || !S.code) return;
-    Net.send('join', { code: S.code, name: S.me.name, color: S.me.color });
+    Net.send('join', {
+      code: S.code,
+      name: S.me.name,
+      color: S.me.color,
+      snapshot: boardSnapshot()      // ignored if the room is still alive
+    });
   });
 
   /* If the room we were in has gone - almost always because the server
@@ -1544,49 +1574,52 @@
     for (const id of [...pips.keys()]) if (!S.players.has(id)) dropPip(id);
   }
 
+  /* Bind exactly ONE video track to the element, in its own MediaStream.
+   *
+   * A peer's stream is a moving target: audio and video arrive as separate
+   * ontrack events on the same object, renegotiation can leave a stale track
+   * behind, and an element bound to that object will not reliably re-render
+   * when its contents change - Safari in particular ignores a track added after
+   * assignment. Picking the one live track and handing the element a stream that
+   * contains only that removes the whole class of problem: the identity changes
+   * whenever the track changes, so the element always re-binds. Audio is not
+   * included; it plays through its own sink. */
+  function pickVideoTrack(stream) {
+    const tracks = stream.getVideoTracks();
+    if (!tracks.length) return null;
+    return tracks.find((t) => t.readyState === 'live' && !t.muted)
+        || tracks.find((t) => t.readyState === 'live')
+        || tracks[tracks.length - 1];
+  }
+
   function attachStream(id, stream) {
     const p = pips.get(id);
     if (!p) return;
 
-    const track = stream.getVideoTracks()[0];
+    const track = pickVideoTrack(stream);
 
-    /* Re-bind whenever the track set changes, not just when the stream object
-     * changes. A peer's audio and video arrive as separate ontrack events on the
-     * SAME MediaStream, so when the mic connects first this element gets bound
-     * to a stream that has no video yet. Adding the camera track later mutates
-     * that same object, so an identity check never fires again - and Safari does
-     * not start rendering a track added after assignment. The result was a
-     * permanently black tile while audio worked perfectly.
-     *
-     * Clearing srcObject before reassigning is what actually forces the element
-     * to pick up the new track. */
-    const bound = p.video.srcObject;
-    const boundVideo = bound ? bound.getVideoTracks().length : -1;
-    if (bound !== stream || boundVideo !== stream.getVideoTracks().length) {
-      p.video.srcObject = null;
-      p.video.srcObject = stream;
-      p.video.play().catch(() => { /* autoplay policy; the tap handler retries */ });
+    if (track !== p.boundTrack) {
+      p.boundTrack = track;
+      p.video.srcObject = track ? new MediaStream([track]) : null;
+      if (track) p.video.play().catch(() => { /* autoplay policy; a tap retries */ });
+      if (track && p.watched !== track) {
+        p.watched = track;
+        for (const ev of ['mute', 'unmute', 'ended']) {
+          track.addEventListener(ev, () => attachStream(id, stream));
+        }
+      }
     }
 
-    /* Say WHY a tile is blank rather than showing an unexplained black box. */
-    const paint = () => {
-      const t = p.video.srcObject && p.video.srcObject.getVideoTracks()[0];
-      let why = null;
-      if (!t) why = 'no video yet';
-      else if (t.readyState === 'ended') why = 'camera off';
-      else if (t.muted || !t.enabled) why = 'camera paused';
-      p.el.classList.toggle('blank', !!why);
-      const label = p.el.querySelector('.pip-blank span');
-      if (label && why) label.textContent = why;
-    };
-    if (track && p.watched !== track) {
-      p.watched = track;
-      track.addEventListener('mute', paint);
-      track.addEventListener('unmute', paint);
-      track.addEventListener('ended', paint);
-    }
-    paint();
+    // Say WHY a tile is blank rather than showing an unexplained black box.
+    const why = !track ? 'no video yet'
+      : track.readyState === 'ended' ? 'camera off'
+        : (track.muted || !track.enabled) ? 'camera paused'
+          : null;
+    p.el.classList.toggle('blank', !!why);
+    const label = p.el.querySelector('.pip-blank span');
+    if (label && why) label.textContent = why;
   }
+
 
   /* Every remote stream gets its own hidden <audio> element, whether or not
     * that person has a camera on. This is the whole reason nobody was audible:
@@ -1608,7 +1641,14 @@
       $('audioSinks').appendChild(el);
       sinks.set(id, el);
     }
-    if (el.srcObject !== stream) el.srcObject = stream;
+    // Audio only: video is handled by the tile, and mixing them here would
+    // make this element fight the tile for the same track.
+    const audio = stream.getAudioTracks();
+    if (!audio.length) return el;
+    if (el.dataset.trackId !== audio[0].id) {
+      el.dataset.trackId = audio[0].id;
+      el.srcObject = new MediaStream(audio);
+    }
     el.play().catch(() => { pendingAudio = true; paintCallBar(); });
     return el;
   }

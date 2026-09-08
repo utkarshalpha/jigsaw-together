@@ -125,8 +125,11 @@ What the free tier costs you, and what to do about it:
 - **It sleeps after ~15 minutes idle**, and the first request afterwards
   takes up to a minute to wake it. Fine for a game you arrange in advance,
   irritating if someone opens the link cold.
-- **Rooms live in memory**, so a sleep or redeploy ends any game in
-  progress. Everyone starts a new one; nothing is corrupted.
+- **Rooms live in memory**, but a game now survives the server restarting.
+  Every client mirrors the whole board, so the first player to reconnect hands
+  it back and play carries on - same code, same pieces, same positions. The
+  snapshot is validated, so a malformed or forged one is refused rather than
+  becoming a corrupt room. Chat history and the scoreboard do reset.
 
 **Keeping it awake, still free.** Render gives 750 instance-hours a month and
 a month is about 730 hours, so one service can stay up continuously inside

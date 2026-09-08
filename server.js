@@ -129,6 +129,95 @@ function pickColour(room, wanted) {
   return PALETTE.find((c) => !taken.has(c)) || ok || PALETTE[0];
 }
 
+/* Rebuild a room from a player's own copy of the board.
+ *
+ * Rooms live in memory, so a redeploy or an idle spin-down ends every game.
+ * But every client already mirrors the entire board - that is what makes the
+ * rendering work - so a returning player can hand it back and carry on.
+ *
+ * The snapshot is untrusted input, so everything is validated and clamped:
+ * a bad or hostile one is refused rather than becoming a corrupt room. Whoever
+ * reconnects first restores it; everyone after that just joins normally. */
+function restoreRoom(code, snap) {
+  try {
+    if (!snap || typeof snap !== 'object') return null;
+    const p = snap.puzzle;
+    const img = snap.image;
+    if (!p || !img || typeof img.dataUrl !== 'string') return null;
+
+    const url = img.dataUrl;
+    const lower = url.slice(0, 8).toLowerCase();
+    if (!url.startsWith('data:image/') && !lower.startsWith('http://') && !lower.startsWith('https://')) return null;
+    if (url.length > MAX_IMAGE_BYTES) return null;
+
+    const rows = p.rows | 0, cols = p.cols | 0;
+    if (rows < 2 || cols < 2 || rows * cols > 1200) return null;
+
+    const num = (v, min, max) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= min && n <= max ? n : null;
+    };
+    const pieceW = num(p.pieceW, 1, 1e5), pieceH = num(p.pieceH, 1, 1e5);
+    const puzzleH = num(p.puzzleH, 1, 1e6);
+    const boardW = num(p.boardW, 1, 1e6), boardH = num(p.boardH, 1, 1e6);
+    const originX = num(p.originX, -1e6, 1e6), originY = num(p.originY, -1e6, 1e6);
+    const snapTol = num(p.snapTol, 0.1, 1e5);
+    if ([pieceW, pieceH, puzzleH, boardW, boardH, originX, originY, snapTol].some((v) => v === null)) return null;
+
+    const total = rows * cols;
+    const pieces = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) pieces.push({ id: r * cols + c, row: r, col: c, group: -1 });
+    }
+
+    // Every piece must belong to exactly one group, or the board is incoherent.
+    const groups = {};
+    const seen = new Set();
+    const list = Array.isArray(p.groups) ? p.groups : [];
+    for (const g of list) {
+      const id = g && (g.id | 0);
+      if (!Number.isInteger(id) || id < 0 || id >= total || groups[id]) return null;
+      const gx = num(g.x, -1e6, 1e6), gy = num(g.y, -1e6, 1e6);
+      if (gx === null || gy === null) return null;
+      const members = Array.isArray(g.p) ? g.p : [];
+      for (const pid of members) {
+        if (!Number.isInteger(pid) || pid < 0 || pid >= total || seen.has(pid)) return null;
+        seen.add(pid);
+        pieces[pid].group = id;
+      }
+      groups[id] = { id, parent: null, pieces: members.slice(), x: gx, y: gy, heldBy: null, heldAt: 0, z: id };
+    }
+    if (seen.size !== total) return null;
+
+    // Pieces whose group was absorbed point at whoever owns them now.
+    for (const pc of pieces) if (pc.group === -1) return null;
+
+    const room = {
+      code,
+      hostId: null,
+      players: new Map(),
+      image: { dataUrl: url, w: img.w | 0 || 1, h: img.h | 0 || 1, title: clean(img.title, 40) || 'Picture' },
+      state: {
+        rows, cols, pieceW, pieceH, puzzleW: PUZZLE_W, puzzleH,
+        boardW, boardH, originX, originY, snapTol,
+        seed: (snap.puzzle.seed >>> 0) || 1,
+        pieces, groups, zTop: total
+      },
+      chat: [],
+      startedAt: Number(snap.startedAt) || Date.now(),
+      solvedAt: null,
+      emptySince: null,
+      restored: true
+    };
+    rooms.set(code, room);
+    console.log('restored room ' + code + ' from a player snapshot (' + total + ' pieces)');
+    return room;
+  } catch (e) {
+    console.error('restore failed:', e && e.message);
+    return null;
+  }
+}
+
 function makeRoom() {
   const room = {
     code: newCode(),
@@ -364,6 +453,10 @@ wss.on('connection', (ws, req) => {
         room = makeRoom();
       } else {
         room = rooms.get(clean(msg.code, 8).toUpperCase());
+        // A player coming back after a restart can hand the board back.
+        if (!room && msg.snapshot && rooms.size < MAX_ROOMS) {
+          room = restoreRoom(clean(msg.code, 8).toUpperCase(), msg.snapshot);
+        }
         if (!room) {
           /* A missing room usually means a typo - but right after a restart it
            * means every game was lost, because rooms live in memory. Saying

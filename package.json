@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node tests/protocol.test.js && node tests/snap.test.js && node tests/hold.test.js",
+    "test": "node tests/protocol.test.js && node tests/snap.test.js && node tests/hold.test.js && node tests/restore.test.js",
     "share": "cloudflared tunnel --url http://localhost:3000 --no-autoupdate",
     "test:security": "node tests/security.probe.js",
     "play": "node tools/play.js"
